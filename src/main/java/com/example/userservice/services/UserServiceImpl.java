@@ -1,10 +1,15 @@
 package com.example.userservice.services;
 
+import com.example.userservice.dtos.SendEmailDto;
 import com.example.userservice.models.Token;
 import com.example.userservice.models.User;
 import com.example.userservice.repositories.TokenRepository;
 import com.example.userservice.repositories.UserRepository;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.lang3.RandomStringUtils;
+import org.apache.kafka.common.network.Send;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -18,12 +23,18 @@ public class UserServiceImpl implements UserService {
     private BCryptPasswordEncoder bCryptPasswordEncoder;
     private UserRepository userRepository;
     private TokenRepository tokenRepository;
+    private KafkaTemplate<String, String> kafkaTemplate;
+    private ObjectMapper objectMapper;
 
     public UserServiceImpl(BCryptPasswordEncoder bCryptPasswordEncoder, UserRepository userRepository,
-                           TokenRepository tokenRepository){
+                           TokenRepository tokenRepository,
+                           KafkaTemplate kafkaTemplate,
+                           ObjectMapper objectMapper){
         this.bCryptPasswordEncoder = bCryptPasswordEncoder;
         this.userRepository = userRepository;
         this.tokenRepository = tokenRepository;
+        this.kafkaTemplate = kafkaTemplate;
+        this.objectMapper = objectMapper;
     }
 
 
@@ -62,6 +73,22 @@ public class UserServiceImpl implements UserService {
         user.setName(name);
         user.setEmail(email);
         user.setPassword(bCryptPasswordEncoder.encode(password));
+
+        //Before Saving user to DB push topic and event to Kafka
+        //EmailService will read the event from kafka and send Welcome email to user
+        //Serialize obj to Json/String format then sent over NW ObjectMapper from Jackson
+        SendEmailDto emailDto = new SendEmailDto();
+        emailDto.setSubject("Welcome to Kafka Lessons and Enjoy the show!!");
+        emailDto.setBody("Happy to have you Onboard, hope you make most out of it");
+        emailDto.setEmail(email);
+        try {
+            kafkaTemplate.send(
+                    "sendEmail",
+                    objectMapper.writeValueAsString(emailDto)
+            );
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
 
         return userRepository.save(user);
     }
